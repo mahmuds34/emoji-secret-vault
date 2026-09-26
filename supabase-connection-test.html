@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Supabase Connection Test</title>
+<style>
+body{font-family:Arial,sans-serif;background:#f4f7fb;margin:0;padding:20px;color:#172033}
+.card{max-width:700px;margin:auto;background:white;padding:22px;border-radius:16px;box-shadow:0 5px 25px #0001}
+h1{margin-top:0;font-size:24px}
+button{border:0;border-radius:10px;padding:12px 18px;background:#2563eb;color:white;font-weight:700;font-size:15px}
+.row{padding:12px;margin:10px 0;border-radius:10px;background:#f5f6f8}
+.ok{border-left:5px solid #16a34a}.bad{border-left:5px solid #dc2626}.info{border-left:5px solid #64748b}
+small{word-break:break-word}
+#log{white-space:pre-wrap;background:#111827;color:#e5e7eb;padding:14px;border-radius:10px;min-height:80px}
+</style>
+</head>
+<body>
+<div class="card">
+<h1>🔧 Supabase Connection Test</h1>
+<p>এই পেজটি শুধু দেখবে GitHub Pages থেকে Supabase ঠিকমতো connect হচ্ছে কি না।</p>
+<button onclick="runTests()">Run Test</button>
+<div id="results"></div>
+<h3>Detailed log</h3>
+<div id="log">Test শুরু করতে “Run Test” চাপুন।</div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+const SUPABASE_URL = "https://uqmujnguejsvnoixjbf.supabase.co";
+const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_wSiPgbPPm-EnQAmv7OtAcQ_KbO7kKwe";
+
+const results = document.getElementById("results");
+const log = document.getElementById("log");
+
+function add(title, ok, detail){
+  const d=document.createElement("div");
+  d.className="row "+(ok?"ok":"bad");
+  d.innerHTML="<b>"+(ok?"✅ ":"❌ ")+title+"</b><br><small>"+detail+"</small>";
+  results.appendChild(d);
+}
+function write(s){ log.textContent += "\n"+s; }
+
+async function runTests(){
+  results.innerHTML="";
+  log.textContent="Starting tests...";
+
+  if(typeof window.supabase === "undefined"){
+    add("Supabase JS SDK",false,"SDK load হয়নি। CDN/network সমস্যা হতে পারে।");
+    write("ERROR: window.supabase is undefined");
+    return;
+  }
+  add("Supabase JS SDK",true,"SDK successfully loaded.");
+  write("SDK loaded.");
+
+  try{
+    const r=await fetch(SUPABASE_URL+"/rest/v1/",{
+      method:"GET",
+      headers:{
+        "apikey":SUPABASE_PUBLISHABLE_KEY,
+        "Authorization":"Bearer "+SUPABASE_PUBLISHABLE_KEY
+      }
+    });
+    const txt=await r.text();
+    add("Supabase REST endpoint",r.ok || r.status===401 || r.status===404,
+      "HTTP "+r.status+" — "+txt.slice(0,500));
+    write("REST HTTP "+r.status);
+  }catch(e){
+    add("Supabase REST endpoint",false,"Network error: "+(e.message||e));
+    write("REST ERROR: "+(e.message||e));
+  }
+
+  try{
+    const client=window.supabase.createClient(SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY);
+    const {data,error}=await client.auth.getSession();
+    if(error){
+      add("Supabase Auth",false,error.message);
+      write("AUTH ERROR: "+JSON.stringify(error));
+    }else{
+      add("Supabase Auth",true,"Auth endpoint responded. Current session: "+(data.session?"Logged in":"Not logged in"));
+      write("AUTH OK");
+    }
+  }catch(e){
+    add("Supabase Auth",false,e.message||String(e));
+    write("AUTH EXCEPTION: "+(e.message||String(e)));
+  }
+
+  try{
+    const r=await fetch(SUPABASE_URL+"/rest/v1/secrets?select=id&limit=1",{
+      headers:{
+        "apikey":SUPABASE_PUBLISHABLE_KEY,
+        "Authorization":"Bearer "+SUPABASE_PUBLISHABLE_KEY
+      }
+    });
+    const txt=await r.text();
+    add("Secrets table endpoint",r.ok || r.status===401 || r.status===403,
+      "HTTP "+r.status+" — "+txt.slice(0,500));
+    write("SECRETS HTTP "+r.status);
+  }catch(e){
+    add("Secrets table endpoint",false,"Network error: "+(e.message||e));
+    write("SECRETS ERROR: "+(e.message||e));
+  }
+
+  write("\nDone. এই পেজের screenshot আমাকে পাঠান।");
+}
+</script>
+</body>
+</html>

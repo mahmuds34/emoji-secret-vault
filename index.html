@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Emoji Secret Vault</title>
+<style>
+*{box-sizing:border-box}body{margin:0;font-family:Arial,sans-serif;background:#f4f7fb;color:#172033}
+.wrap{max-width:760px;margin:0 auto;padding:24px 16px}.card{background:#fff;border-radius:16px;padding:20px;margin:14px 0;box-shadow:0 4px 18px #00000012}
+h1{margin:0 0 8px}.muted{color:#667085}.hidden{display:none}.row{display:flex;gap:10px;flex-wrap:wrap}
+input,button{width:100%;padding:12px;border-radius:10px;font-size:16px}
+input{border:1px solid #ccd3df}button{border:0;background:#2563eb;color:#fff;cursor:pointer}
+button.secondary{background:#64748b}button.danger{background:#dc2626}.half{flex:1;min-width:140px}
+.item{border:1px solid #e1e6ef;border-radius:12px;padding:14px;margin-top:10px}.emoji{font-size:38px;word-break:break-all}
+.msg{padding:10px;border-radius:10px;background:#eef4ff;margin:10px 0}.error{background:#fee2e2;color:#991b1b}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card">
+    <h1>🔐 Emoji Secret Vault</h1>
+    <div class="muted">Hide a secret inside an emoji and keep a cloud copy in your private vault.</div>
+  </div>
+
+  <div id="auth" class="card">
+    <h2>Account</h2>
+    <input id="email" type="email" placeholder="Email">
+    <br><br>
+    <input id="password" type="password" placeholder="Password (6+ characters)">
+    <br><br>
+    <div class="row">
+      <button class="half" id="register">Register</button>
+      <button class="half secondary" id="login">Login</button>
+    </div>
+    <div id="authMsg"></div>
+  </div>
+
+  <div id="app" class="hidden">
+    <div class="card">
+      <div class="row">
+        <button class="half secondary" id="logout">Logout</button>
+        <button class="half" id="refresh">Refresh Vault</button>
+      </div>
+      <p class="muted" id="who"></p>
+    </div>
+
+    <div class="card">
+      <h2>➕ Create Secret</h2>
+      <input id="label" placeholder="Label, e.g. My note">
+      <br><br>
+      <input id="secret" placeholder="Secret information">
+      <br><br>
+      <input id="emoji" value="🔒" maxlength="8" placeholder="Emoji">
+      <br><br>
+      <button id="save">Save to My Vault</button>
+      <div id="saveMsg"></div>
+    </div>
+
+    <div class="card">
+      <h2>☁️ My Vault</h2>
+      <div id="vault" class="muted">Loading...</div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+const SUPABASE_URL = "https://uqmujnguejsvnoixjbf.supabase.co";
+const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_wSiPgbPPm-EnQAmv7OtAcQ_KbO7kKwe";
+
+const client = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
+
+const $ = id => document.getElementById(id);
+const z0="\\u200B", z1="\\u200C", sep="\\u200D";
+
+function encodeSecret(secret, emoji){
+  let bits="";
+  for(const ch of new TextEncoder().encode(secret)){
+    bits += ch.toString(2).padStart(8,"0").replaceAll("0",z0).replaceAll("1",z1);
+  }
+  return emoji + sep + bits;
+}
+function decodeSecret(hidden){
+  const p=hidden.split(sep);
+  if(p.length<2) return "";
+  const bits=p.slice(1).join(sep).replaceAll(z0,"0").replaceAll(z1,"1");
+  const bytes=[];
+  for(let i=0;i+7<bits.length;i+=8) bytes.push(parseInt(bits.slice(i,i+8),2));
+  try{return new TextDecoder().decode(new Uint8Array(bytes));}catch(e){return "";}
+}
+function msg(el,text,error=false){el.className="msg"+(error?" error":"");el.textContent=text;}
+
+async function getSession(){
+  const {data,error}=await client.auth.getSession();
+  if(error) throw error;
+  return data.session;
+}
+async function showApp(){
+  const session=await getSession();
+  if(session){
+    $("auth").classList.add("hidden"); $("app").classList.remove("hidden");
+    $("who").textContent="Logged in as: "+session.user.email;
+    loadVault();
+  }else{
+    $("auth").classList.remove("hidden"); $("app").classList.add("hidden");
+  }
+}
+$("register").onclick=async()=>{
+  const email=$("email").value.trim(), password=$("password").value;
+  if(!email||password.length<6){msg($("authMsg"),"Enter a valid email and a password of at least 6 characters.",true);return}
+  const {data,error}=await client.auth.signUp({email,password,options:{
+    emailRedirectTo: location.origin + location.pathname
+  }});
+  if(error){msg($("authMsg"),error.message,true);return}
+  if(data.session){msg($("authMsg"),"Registration successful. You are logged in.");showApp();}
+  else msg($("authMsg"),"Registration successful. Check your email, verify it, then Login.");
+};
+$("login").onclick=async()=>{
+  const email=$("email").value.trim(), password=$("password").value;
+  const {data,error}=await client.auth.signInWithPassword({email,password});
+  if(error){msg($("authMsg"),error.message,true);return}
+  msg($("authMsg"),"Login successful.");showApp();
+};
+$("logout").onclick=async()=>{await client.auth.signOut();showApp()};
+$("refresh").onclick=loadVault;
+
+$("save").onclick=async()=>{
+  const session=await getSession();
+  if(!session){msg($("saveMsg"),"Please login first.",true);return}
+  const label=$("label").value.trim(), secret=$("secret").value, emoji=$("emoji").value.trim()||"🔒";
+  if(!label||!secret){msg($("saveMsg"),"Enter both a label and a secret.",true);return}
+  const hidden=encodeSecret(secret,emoji);
+  const {error}=await client.from("secrets").insert({
+    user_id:session.user.id,label,hidden_emoji:hidden
+  });
+  if(error){msg($("saveMsg"),error.message,true);return}
+  $("label").value="";$("secret").value="";
+  msg($("saveMsg"),"Saved to your cloud vault.");
+  loadVault();
+};
+
+async function loadVault(){
+  const session=await getSession();
+  if(!session)return;
+  $("vault").textContent="Loading...";
+  const {data,error}=await client.from("secrets").select("id,label,hidden_emoji,created_at").order("created_at",{ascending:false});
+  if(error){msg($("vault"),error.message,true);return}
+  if(!data.length){$("vault").textContent="No secrets yet.";return}
+  $("vault").innerHTML="";
+  data.forEach(row=>{
+    const item=document.createElement("div");item.className="item";
+    const title=document.createElement("b");title.textContent=row.label;
+    const emoji=document.createElement("div");emoji.className="emoji";emoji.textContent=row.hidden_emoji;
+    const date=document.createElement("div");date.className="muted";date.textContent=new Date(row.created_at).toLocaleString();
+    const buttons=document.createElement("div");buttons.className="row";
+    const copy=document.createElement("button");copy.className="half";copy.textContent="Copy";
+    copy.onclick=()=>navigator.clipboard.writeText(row.hidden_emoji).then(()=>alert("Copied."));
+    const dec=document.createElement("button");dec.className="half secondary";dec.textContent="Decode";
+    dec.onclick=()=>alert("Decoded secret:\\n\\n"+decodeSecret(row.hidden_emoji));
+    const del=document.createElement("button");del.className="half danger";del.textContent="Delete";
+    del.onclick=async()=>{
+      if(!confirm("Delete this secret?"))return;
+      const r=await client.from("secrets").delete().eq("id",row.id);
+      if(r.error)alert(r.error.message);else loadVault();
+    };
+    buttons.append(copy,dec,del);item.append(title,emoji,date,buttons);$("vault").appendChild(item);
+  });
+}
+client.auth.onAuthStateChange(()=>showApp());
+showApp().catch(e=>msg($("authMsg"),e.message,true));
+</script>
+</body>
+</html>
